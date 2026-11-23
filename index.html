@@ -1,0 +1,109 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SPX live closing distribution</title>
+<style>
+:root{color-scheme:light dark;font:16px/1.45 "Inter",system-ui,sans-serif}body{margin:0;padding:clamp(16px,4vw,54px);background:#10151a;color:#e3e9ef}section{max-width:1040px;margin:auto}h2{font-size:clamp(24px,4vw,40px);margin:0}#feed{color:#f0c977}#asof,details{color:#b6c2cd}svg{overflow:visible}input{width:100%;accent-color:#84b8db}details{margin-top:22px}table{border-collapse:collapse;font-variant-numeric:tabular-nums}td,th{text-align:left;padding:3px 14px 3px 0}summary{cursor:pointer}
+</style></head><body><section id="spx-close" data-viz-composition>
+<h2>SPX option-implied closing distribution</h2>
+<p id="feed" role="status">Connecting to price service…</p><p id="asof"></p>
+<p><span style="color:#dd5459">■</span> Below Friday’s close <b id="down"></b>　<span style="color:#1ba36d">■</span> Above <b id="up"></b></p>
+<div style="position:relative"><div hidden data-price-tip role="tooltip" style="position:absolute;z-index:1;pointer-events:none;background:#202733;color:white;padding:5px 9px;border-radius:4px;font:13px system-ui;white-space:pre-line"></div><svg style="display:block;width:100%;height:280px" role="img" aria-label="Probability by ten-point SPX closing range. Bars turn green above Friday’s close of 6,910.39."></svg></div>
+<label class="form-label">SPX closing level <output id="spx-level">7,100</output>
+<input class="form-range" type="range" min="6400" max="7600" step="1" value="7100"></label>
+<p aria-live="polite" class="tabular-nums" data-odds></p>
+<p>November 23, 2026 SPXW · Option-implied, risk-neutral probabilities.</p>
+</section>
+<script src="config.js"></script>
+<script>
+let probabilities=[];
+const root=document.getElementById('spx-close'), svg=root.querySelector('svg'), slider=root.querySelector('input');
+const friday=6910.39, lo=6400, hi=7600;
+function cdf(x){
+ const i=Math.floor(x-lo), f=x-lo-i;
+ return probabilities[i]+f*((probabilities[i+1]??probabilities[i])-probabilities[i]);
+}
+function mark(tag,attrs,label){
+ const el=document.createElementNS('http://www.w3.org/2000/svg',tag);
+ for(const [k,v] of Object.entries(attrs))el.setAttribute(k,v);
+ if(label)el.textContent=label;
+ svg.append(el);return el;
+}
+function draw(){
+ if(!probabilities.length)return;
+ const width=svg.clientWidth||600,left=37,right=width-12,base=235,plot=170;
+ const x=n=>left+(n-lo)/(hi-lo)*(right-left);
+ svg.replaceChildren();
+ const label=(px,py,t,anchor='middle')=>mark('text',{x:px,y:py,'font-size':12,'text-anchor':anchor,fill:'currentColor'},t);
+ const bins=[];
+ for(let i=-52;i<69;i++){
+   const a=Math.max(lo,friday+i*10),b=Math.min(hi,friday+(i+1)*10);
+   if(a<b)bins.push([a,b,cdf(b)-cdf(a)]);
+ }
+ const cap=Math.ceil(Math.max(...bins.map(b=>b[2]))*100)/100;
+ label(left,16,'Probability per 10-point range','start');
+ for(let i=0;i<=Math.round(cap*100);i++){
+   const y=base-i/100/cap*plot;
+   mark('line',{x1:left,x2:right,y1:y,y2:y,stroke:'currentColor',opacity:0.12});
+   label(left-5,y+4,i+'%','end');
+ }
+ for(const [a,b,p] of bins){
+   const h=p/cap*plot;
+   mark('rect',{x:x(a),y:base-h,width:Math.max(0.1,(x(b)-x(a))*.92),height:h,fill:b<=friday?'#dd5459':'#1ba36d'});
+ }
+ for(let n=6600;n<=7500;n+=width<480?300:150)label(x(n),253,n.toLocaleString('en-US'));
+ label((left+right)/2,274,'SPX closing level');
+ mark('line',{x1:x(friday),x2:x(friday),y1:45,y2:base,stroke:'currentColor','stroke-dasharray':'4 3',opacity:.7});
+ label(x(friday),39,'Fri 6,910.39');
+ const level=Number(slider.value);
+ mark('line',{x1:x(level),x2:x(level),y1:60,y2:base,stroke:'currentColor',opacity:.6});
+ const tip=root.querySelector('[data-price-tip]');
+ tip.hidden=true;
+ const shade=mark('rect',{y:60,height:base-60,fill:'currentColor',opacity:.12,visibility:'hidden','pointer-events':'none'});
+ const price=new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+ const move=new Intl.NumberFormat('en-US',{style:'percent',signDisplay:'exceptZero',minimumFractionDigits:2,maximumFractionDigits:2});
+ function inspect(event){
+   const box=svg.getBoundingClientRect(), px=event.clientX-box.left, py=event.clientY-box.top;
+   const bin=bins.find(([a,b])=>px>=x(a) && px<=x(b));
+   if(!bin || py<45 || py>base+1){hide();return;}
+   const [a,b,p]=bin;
+   shade.setAttribute('x',x(a));shade.setAttribute('width',x(b)-x(a));shade.setAttribute('visibility','visible');
+   const fromFriday=value=>move.format((value-friday)/friday);
+   tip.textContent='SPX '+price.format(a)+'–'+price.format(b)+'\n'+fromFriday(a)+' to '+fromFriday(b)+' vs Friday close\nProbability '+(100*p<.01?'<0.01':(100*p).toFixed(2))+'%';
+   tip.hidden=false;
+   tip.style.left=Math.max(0,Math.min(width-tip.offsetWidth,px-tip.offsetWidth/2))+'px';
+   tip.style.top=Math.max(0,py-tip.offsetHeight-10)+'px';
+ }
+ function hide(){tip.hidden=true;shade.setAttribute('visibility','hidden');}
+ svg.onpointermove=inspect;
+ svg.onpointerdown=inspect;
+ svg.onpointerleave=hide;
+ svg.onpointercancel=hide;
+ root.querySelector('output').textContent=level.toLocaleString('en-US');
+ const below=100*cdf(level);
+ root.querySelector('[data-odds]').textContent=below.toFixed(1)+'% below '+level.toLocaleString('en-US')+' · '+(100-below).toFixed(1)+'% above';
+}
+slider.addEventListener('input',draw);
+new ResizeObserver(draw).observe(svg);
+let lastKey='';
+async function refresh(){
+ try {
+   const response=await fetch(window.SPX_API_URL || './snapshot.json',{cache:'no-store',signal:AbortSignal.timeout(8000)});
+   if(!response.ok)throw new Error('Connection lost');
+   const state=await response.json();
+   document.querySelector('#feed').textContent=({live:'Live',snapshot:'Snapshot · recorded distribution',stale:'Snapshot · live updates paused',expired:'Session ended · November 23 SPXW expired'})[state.status] || 'Snapshot';
+   document.querySelector('#asof').textContent='As of '+new Date(state.timestamp).toLocaleString();
+   const key=JSON.stringify([state.timestamp,state.cdf]);
+   if(lastKey!==key){
+     probabilities=state.cdf;
+     document.querySelector('#down').textContent=(100*cdf(friday)).toFixed(1)+'%';
+     document.querySelector('#up').textContent=(100*(1-cdf(friday))).toFixed(1)+'%';
+     draw();
+     lastKey=key;
+   }
+ } catch(error) {
+   document.querySelector('#feed').textContent='Price service disconnected · showing last available data';
+ } finally {
+   setTimeout(refresh,2500);
+ }
+}
+refresh();
+</script>
+</body></html>
